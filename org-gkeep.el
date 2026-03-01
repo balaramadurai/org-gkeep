@@ -163,10 +163,11 @@ environment variables for the subprocess."
                         (format "GKEEP_STATE_FILE=%s" org-gkeep-state-file))
                   process-environment))
          (cmd (append (list org-gkeep-python-executable script) args))
-         (buf (generate-new-buffer " *org-gkeep-bridge*")))
+         (buf (generate-new-buffer " *org-gkeep-bridge*"))
+         (stderr-file (make-temp-file "org-gkeep-stderr")))
     (unwind-protect
         (let ((exit-code (apply #'call-process
-                                (car cmd) nil buf nil (cdr cmd))))
+                                (car cmd) nil (list buf stderr-file) nil (cdr cmd))))
           (with-current-buffer buf
             (goto-char (point-min))
             (if (zerop exit-code)
@@ -177,7 +178,8 @@ environment variables for the subprocess."
                           (buffer-string))))
               (error "org-gkeep: bridge failed (exit %d): %s"
                      exit-code (buffer-string)))))
-      (kill-buffer buf))))
+      (kill-buffer buf)
+      (delete-file stderr-file))))
 
 
 ;;; API functions (via bridge)

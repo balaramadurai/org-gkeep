@@ -22,6 +22,10 @@ import argparse
 import json
 import os
 import sys
+import warnings
+
+# Suppress Python warnings that corrupt JSON output on stdout
+warnings.filterwarnings("ignore")
 
 try:
     import gkeepapi
