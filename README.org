@@ -1,0 +1,68 @@
+#+TITLE: org-gkeep — Google Keep Integration for Org-mode
+#+AUTHOR: Bala Ramadurai
+
+* Overview
+
+=org-gkeep= pulls Google Keep notes into Org-mode headings and creates new notes from Org.
+
+** Features
+
+- Pull notes from Google Keep into Org headings with properties
+- Text notes become plain body text
+- List/checklist notes become Org checkboxes (=- [ ]= / =- [X]=)
+- Create new notes in Google Keep from Org headings or interactively
+- Delete notes from Google Keep
+- Browse notes in Google Keep web UI
+
+** Limitations (Google Keep API)
+
+- *No update/PATCH* — notes can only be created or deleted, not modified
+- No labels, colors, pinned, archived, or reminders via API
+- Requires Google Workspace account (enterprise API)
+
+* Requirements
+
+- Emacs 27.1+
+- =oauth2-auto= and =aio= packages
+- =request.el=
+- Google Cloud project with Keep API enabled
+- Google Workspace Business Standard or higher
+
+* Installation
+
+#+begin_src emacs-lisp
+(use-package org-gkeep
+  :straight (org-gkeep :type git :host github :repo "balaramadurai/org-gkeep")
+  :defer t
+  :commands (org-gkeep-pull org-gkeep-create-note
+             org-gkeep-delete-at-point org-gkeep-browse-note)
+  :custom
+  (org-gkeep-account "you@example.com"))
+#+end_src
+
+* Usage
+
+| Command                  | Description                          |
+|--------------------------+--------------------------------------|
+| =M-x org-gkeep-pull=    | Pull all notes from Keep into Org    |
+| =M-x org-gkeep-create-note= | Create a note (from heading or interactive) |
+| =M-x org-gkeep-delete-at-point= | Delete note from Keep        |
+| =M-x org-gkeep-browse-note= | Open note in browser             |
+
+* Data Model
+
+| Google Keep       | Org-mode               |
+|-------------------+------------------------|
+| Note title        | Heading text           |
+| TextContent body  | Body text              |
+| ListItem          | =- [ ]= / =- [X]=     |
+| ListItem children | Indented =  - [ ]=     |
+| Note.name         | Property =GKEEP_ID=    |
+| Note.createTime   | Property =GKEEP_CREATED= |
+| Note.updateTime   | Property =GKEEP_UPDATED= |
+| Note.trashed      | Property =GKEEP_TRASHED= |
+| Text vs List      | Property =GKEEP_TYPE=  |
+
+* License
+
+GPLv3. See [[file:LICENSE][LICENSE]].
