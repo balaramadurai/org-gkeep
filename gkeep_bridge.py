@@ -184,10 +184,17 @@ def cmd_update(args):
         # Clear existing items and add new ones
         for item in list(note.items):
             item.delete()
+        last_parent = None
         for item_data in items_data:
             new_item = note.add(item_data["text"], item_data.get("checked", False))
-            if item_data.get("indented", False):
-                new_item.indent()
+            if item_data.get("indented", False) and last_parent is not None:
+                try:
+                    new_item.indent(last_parent)
+                except TypeError:
+                    # Older gkeepapi versions use indent() without args
+                    new_item.indent()
+            else:
+                last_parent = new_item
     elif args.text is not None:
         note.text = args.text
 
