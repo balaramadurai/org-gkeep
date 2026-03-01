@@ -565,25 +565,27 @@ Excludes the property drawer, planning lines, and child headings."
 ;;;###autoload
 (defun org-gkeep-create-note ()
   "Create a new Google Keep note.
-If at an Org heading, creates from heading content.
-Otherwise, prompts interactively for title and body."
+If at an Org heading in any file, creates from heading content
+and stores GKEEP_ID properties on the current heading.
+Otherwise, prompts interactively and inserts into the target file."
   (interactive)
-  (let (data result)
-    (if (and (derived-mode-p 'org-mode) (org-at-heading-p))
-        (setq data (org-gkeep--org-to-note-data))
-      (let* ((title (read-string "Note title: "))
-             (body (read-string "Note body (empty for none): ")))
-        (setq data `((title . ,title)
+  (let* ((at-heading (and (derived-mode-p 'org-mode) (org-at-heading-p)))
+         (data (if at-heading
+                   (org-gkeep--org-to-note-data)
+                 (let ((title (read-string "Note title: "))
+                       (body (read-string "Note body (empty for none): ")))
+                   `((title . ,title)
                      (body . ((text . ,body)))))))
-    (setq result (org-gkeep--create-note data))
-    ;; Insert into Org
-    (org-gkeep--insert-note result)
-    ;; If at heading, store the ID
-    (when (and (derived-mode-p 'org-mode) (org-at-heading-p))
-      (org-entry-put nil "GKEEP_ID" (alist-get 'name result))
-      (org-entry-put nil "GKEEP_TYPE" (org-gkeep--note-type result))
-      (org-entry-put nil "GKEEP_CREATED" (or (alist-get 'createTime result) ""))
-      (org-entry-put nil "GKEEP_UPDATED" (or (alist-get 'updateTime result) "")))
+         (result (org-gkeep--create-note data)))
+    (if at-heading
+        ;; Tag the existing heading with Keep metadata
+        (progn
+          (org-entry-put nil "GKEEP_ID" (alist-get 'name result))
+          (org-entry-put nil "GKEEP_TYPE" (org-gkeep--note-type result))
+          (org-entry-put nil "GKEEP_CREATED" (or (alist-get 'createTime result) ""))
+          (org-entry-put nil "GKEEP_UPDATED" (or (alist-get 'updateTime result) "")))
+      ;; Interactive: insert new heading in target file
+      (org-gkeep--insert-note result))
     (message "org-gkeep: created \"%s\"" (alist-get 'title data))))
 
 ;;;###autoload
