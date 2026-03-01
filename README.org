@@ -3,30 +3,53 @@
 
 * Overview
 
-=org-gkeep= pulls Google Keep notes into Org-mode headings and creates new notes from Org.
+=org-gkeep= provides bidirectional sync between Google Keep and Org-mode using the [[https://github.com/kiwiz/gkeepapi][gkeepapi]] Python library.
 
 ** Features
 
-- Pull notes from Google Keep into Org headings with properties
+- Pull notes from Google Keep into Org headings with full metadata
+- Push/update notes from Org headings to Google Keep
 - Text notes become plain body text
 - List/checklist notes become Org checkboxes (=- [ ]= / =- [X]=)
-- Create new notes in Google Keep from Org headings or interactively
-- Delete notes from Google Keep
+- Labels synced as Org tags
+- Colors, pinned, archived status tracked as properties
+- Create, update, delete, and trash notes
 - Browse notes in Google Keep web UI
+- State caching for fast subsequent syncs
 
-** Limitations (Google Keep API)
+** Compared to Official API
 
-- *No update/PATCH* — notes can only be created or deleted, not modified
-- No labels, colors, pinned, archived, or reminders via API
-- Requires Google Workspace account (enterprise API)
+The official Google Keep API requires Enterprise Workspace and has no update support. =org-gkeep= uses the unofficial =gkeepapi= library which works with *any* Google account and supports the full feature set.
 
 * Requirements
 
 - Emacs 27.1+
-- =oauth2-auto= and =aio= packages
-- =request.el=
-- Google Cloud project with Keep API enabled
-- Google Workspace Business Standard or higher
+- Python 3 with =gkeepapi= package
+- A Google account (personal or Workspace)
+
+#+begin_src shell
+pip install gkeepapi
+#+end_src
+
+* Authentication
+
+=gkeepapi= requires a master token for authentication.
+
+#+begin_src shell
+pip install gpsoauth
+python3 -c "
+import gpsoauth
+# Follow gpsoauth docs to generate a master token
+# Store it securely
+"
+#+end_src
+
+Set the token in your Emacs config (store securely via auth-source or encrypted file):
+
+#+begin_src emacs-lisp
+(setq org-gkeep-email "you@gmail.com"
+      org-gkeep-master-token "your-master-token")
+#+end_src
 
 * Installation
 
@@ -34,34 +57,43 @@
 (use-package org-gkeep
   :straight (org-gkeep :type git :host github :repo "balaramadurai/org-gkeep")
   :defer t
-  :commands (org-gkeep-pull org-gkeep-create-note
-             org-gkeep-delete-at-point org-gkeep-browse-note)
+  :commands (org-gkeep-pull org-gkeep-push-at-point
+             org-gkeep-create-note org-gkeep-delete-at-point
+             org-gkeep-browse-note org-gkeep-list-labels
+             org-gkeep-auth-test)
   :custom
-  (org-gkeep-account "you@example.com"))
+  (org-gkeep-email "you@gmail.com")
+  (org-gkeep-master-token "your-master-token"))
 #+end_src
 
 * Usage
 
-| Command                  | Description                          |
-|--------------------------+--------------------------------------|
-| =M-x org-gkeep-pull=    | Pull all notes from Keep into Org    |
-| =M-x org-gkeep-create-note= | Create a note (from heading or interactive) |
-| =M-x org-gkeep-delete-at-point= | Delete note from Keep        |
-| =M-x org-gkeep-browse-note= | Open note in browser             |
+| Command                         | Description                             |
+|---------------------------------+-----------------------------------------|
+| =M-x org-gkeep-pull=           | Pull all notes from Keep into Org       |
+| =M-x org-gkeep-push-at-point=  | Push heading to Keep (create or update) |
+| =M-x org-gkeep-create-note=    | Create note (from heading or interactive) |
+| =M-x org-gkeep-delete-at-point= | Delete note from Keep                  |
+| =M-x org-gkeep-browse-note=    | Open note in browser                    |
+| =M-x org-gkeep-list-labels=    | Show all Keep labels                    |
+| =M-x org-gkeep-auth-test=      | Test authentication                     |
 
 * Data Model
 
-| Google Keep       | Org-mode               |
-|-------------------+------------------------|
-| Note title        | Heading text           |
-| TextContent body  | Body text              |
-| ListItem          | =- [ ]= / =- [X]=     |
-| ListItem children | Indented =  - [ ]=     |
-| Note.name         | Property =GKEEP_ID=    |
-| Note.createTime   | Property =GKEEP_CREATED= |
-| Note.updateTime   | Property =GKEEP_UPDATED= |
-| Note.trashed      | Property =GKEEP_TRASHED= |
-| Text vs List      | Property =GKEEP_TYPE=  |
+| Google Keep     | Org-mode               |
+|-----------------+------------------------|
+| Note title      | Heading text           |
+| Text body       | Body text              |
+| ListItem        | =- [ ]= / =- [X]=     |
+| Indented items  | =  - [ ]=              |
+| Labels          | Org tags               |
+| Color           | Property =GKEEP_COLOR= |
+| Pinned          | Property =GKEEP_PINNED= |
+| Archived        | Property =GKEEP_ARCHIVED= |
+| Note ID         | Property =GKEEP_ID=    |
+| Created time    | Property =GKEEP_CREATED= |
+| Updated time    | Property =GKEEP_UPDATED= |
+| Text vs List    | Property =GKEEP_TYPE=  |
 
 * License
 
