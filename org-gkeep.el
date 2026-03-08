@@ -557,6 +557,32 @@ When `org-gkeep-target-heading' is set, inserts under that heading path."
         (setq ids (append ids (org-gkeep--collect-ids-in-file file)))))
     (delete-dups ids)))
 
+(defun org-gkeep--collect-headings-in-file (file)
+  "Collect headings with GKEEP_ID in FILE.
+Returns a list of (marker . note-id) pairs."
+  (let ((results nil))
+    (when (file-exists-p file)
+      (with-current-buffer (find-file-noselect file)
+        (org-with-wide-buffer
+         (goto-char (point-min))
+         (while (re-search-forward ":GKEEP_ID:" nil t)
+           (let ((id (string-trim (or (org-entry-get nil "GKEEP_ID") ""))))
+             (when (not (string-empty-p id))
+               (push (cons (point-marker) id) results)))
+           (org-end-of-subtree t t)))))
+    (nreverse results)))
+
+(defun org-gkeep--collect-all-headings ()
+  "Collect all headings with GKEEP_ID across target file and agenda files.
+Returns a list of (marker . note-id) pairs."
+  (let* ((primary-file (expand-file-name (org-gkeep--get-target-file)))
+         (results (org-gkeep--collect-headings-in-file primary-file)))
+    (dolist (file (org-agenda-files t))
+      (unless (string= (expand-file-name file) primary-file)
+        (setq results (append results
+                              (org-gkeep--collect-headings-in-file file)))))
+    results))
+
 (defun org-gkeep--collect-ids-in-file (file)
   "Collect GKEEP_IDs in FILE."
   (let ((ids nil))
@@ -639,6 +665,43 @@ When `org-gkeep-target-heading' is set, inserts under that heading path."
              new-count updated-count deleted-count)))
 
 ;;;###autoload
+(defun org-gkeep-sync ()
+  "Synchronize Org headings with Google Keep.
+Pulls remote changes first, then pushes all local headings
+that have a GKEEP_ID property."
+  (interactive)
+  (message "org-gkeep: starting sync...")
+  (org-gkeep-pull)
+  (org-gkeep-push-all)
+  (message "org-gkeep: sync complete"))
+
+(defun org-gkeep--push-at-marker (marker)
+  "Push the Org heading at MARKER to Google Keep.
+Non-interactive version of `org-gkeep-push-at-point' for batch use.
+The heading must have a GKEEP_ID property (always an update).
+Returns t on success, nil on error."
+  (condition-case err
+      (with-current-buffer (marker-buffer marker)
+        (org-with-wide-buffer
+         (goto-char marker)
+         (org-back-to-heading t)
+         (let* ((note-id (org-entry-get nil "GKEEP_ID"))
+                (data (org-gkeep--org-to-note-data))
+                (title (alist-get 'title data))
+                (text (alist-get 'text data))
+                (list-items (alist-get 'list-items data))
+                (labels (alist-get 'labels data))
+                (color (alist-get 'color data))
+                (result (org-gkeep--update-note-api
+                         note-id title text labels color nil nil list-items))
+                (ts (alist-get 'timestamps result)))
+           (org-entry-put nil "GKEEP_UPDATED" (or (alist-get 'updated ts) ""))
+           t)))
+    (error
+     (message "org-gkeep: push failed at %S: %s" marker (error-message-string err))
+     nil)))
+
+;;;###autoload
 (defun org-gkeep-push-at-point ()
   "Push the Org heading at point to Google Keep.
 Creates a new note if no GKEEP_ID, otherwise updates the existing note."
@@ -670,6 +733,36 @@ Creates a new note if no GKEEP_ID, otherwise updates the existing note."
     (let ((ts (alist-get 'timestamps result)))
       (org-entry-put nil "GKEEP_CREATED" (or (alist-get 'created ts) ""))
       (org-entry-put nil "GKEEP_UPDATED" (or (alist-get 'updated ts) "")))))
+
+;;;###autoload
+(defun org-gkeep-push-all ()
+  "Push all Org headings with GKEEP_ID to Google Keep.
+Iterates over all headings that have a GKEEP_ID property across
+the target file and agenda files, updating each in Google Keep."
+  (interactive)
+  (let* ((headings (org-gkeep--collect-all-headings))
+         (total (length headings))
+         (success 0)
+         (failed 0))
+    (if (zerop total)
+        (message "org-gkeep: no headings with GKEEP_ID found")
+      (message "org-gkeep: pushing %d notes to Google Keep..." total)
+      (cl-loop for (marker . _note-id) in headings
+               for i from 1
+               do (message "org-gkeep: pushing %d/%d..." i total)
+               (if (org-gkeep--push-at-marker marker)
+                   (cl-incf success)
+                 (cl-incf failed)))
+      ;; Save modified buffers
+      (let ((saved-buffers nil))
+        (dolist (entry headings)
+          (let ((buf (marker-buffer (car entry))))
+            (when (and buf (buffer-modified-p buf)
+                       (not (member buf saved-buffers)))
+              (with-current-buffer buf (save-buffer))
+              (push buf saved-buffers)))))
+      (message "org-gkeep: pushed %d/%d notes (%d failed)"
+               success total failed))))
 
 ;;;###autoload
 (defun org-gkeep-create-note ()
