@@ -85,6 +85,19 @@ When nil, uses `org-gkeep-default-file'."
   :group 'org-gkeep
   :type '(choice (const nil) file))
 
+(defcustom org-gkeep-target-heading nil
+  "Heading path under which to insert new Google Keep notes.
+A list of strings representing the heading hierarchy, e.g.
+\\='(\"Inbox\" \"Google Keep\") means notes go under:
+  * Inbox
+  ** Google Keep
+  *** <note here>
+
+When nil, new notes are appended to the end of the file.
+The headings are created automatically if they don't exist."
+  :group 'org-gkeep
+  :type '(choice (const nil) (repeat string)))
+
 (defcustom org-gkeep-python-executable "python3"
   "Python executable for running the gkeep bridge script."
   :group 'org-gkeep
@@ -430,15 +443,65 @@ Excludes the property drawer, planning lines, and child headings."
           (goto-char body-start)
           (insert new-text "\n"))))))
 
+(defun org-gkeep--ensure-heading-path (headings)
+  "Ensure HEADINGS hierarchy exists, creating if needed.
+HEADINGS is a list of strings like (\"Inbox\" \"Google Keep\").
+Leaves point at the end of the deepest heading's subtree.
+Returns the level of the deepest heading."
+  (let ((level 0))
+    (goto-char (point-min))
+    (dolist (title headings)
+      (cl-incf level)
+      (let ((stars (make-string level ?*))
+            (found nil))
+        ;; Search for this heading at the correct level
+        (save-excursion
+          (when (> level 1)
+            ;; Stay within parent subtree
+            (org-back-to-heading t))
+          (let ((bound (if (> level 1)
+                           (save-excursion (org-end-of-subtree t t) (point))
+                         (point-max))))
+            (while (and (not found)
+                        (re-search-forward
+                         (format "^%s %s$" (regexp-quote stars)
+                                 (regexp-quote title))
+                         bound t))
+              (setq found (point)))))
+        (if found
+            (progn
+              (goto-char found)
+              (org-back-to-heading t))
+          ;; Create the heading
+          (if (= level 1)
+              (progn
+                (goto-char (point-max))
+                (unless (bolp) (insert "\n")))
+            (org-end-of-subtree t t)
+            (unless (bolp) (insert "\n")))
+          (insert (format "%s %s\n" stars title))
+          (forward-line -1)
+          (org-back-to-heading t))))
+    level))
+
 (defun org-gkeep--insert-note (note)
-  "Insert a new Org heading for Google Keep NOTE."
-  (let* ((org-text (org-gkeep--note-to-org note 2))
-         (file (org-gkeep--get-target-file)))
+  "Insert a new Org heading for Google Keep NOTE.
+When `org-gkeep-target-heading' is set, inserts under that heading path."
+  (let* ((file (org-gkeep--get-target-file)))
     (with-current-buffer (find-file-noselect file)
       (org-with-wide-buffer
-       (goto-char (point-max))
-       (unless (bolp) (insert "\n"))
-       (insert org-text)))))
+       (if org-gkeep-target-heading
+           (let* ((parent-level (org-gkeep--ensure-heading-path
+                                 org-gkeep-target-heading))
+                  (note-level (1+ parent-level))
+                  (org-text (org-gkeep--note-to-org note note-level)))
+             (org-end-of-subtree t t)
+             (unless (bolp) (insert "\n"))
+             (insert org-text))
+         (let ((org-text (org-gkeep--note-to-org note 2)))
+           (goto-char (point-max))
+           (unless (bolp) (insert "\n"))
+           (insert org-text)))))))
 
 (defun org-gkeep--update-note-entry (note)
   "Update an existing Org heading from Google Keep NOTE data."
