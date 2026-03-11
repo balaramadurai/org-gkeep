@@ -258,18 +258,41 @@ PINNED, and LIST-ITEMS (JSON string)."
   (alist-get 'type note "text"))
 
 (defun org-gkeep--items-to-org-body (items)
-  "Convert list ITEMS to Org checkbox string."
+  "Convert list ITEMS to Org checkbox string.
+Handles the case where a single item's text contains embedded
+checkbox markers (- [ ] / - [X]) or multiple newline-separated entries."
   (when items
-    (mapconcat
-     (lambda (item)
-       (let* ((text (or (alist-get 'text item) ""))
-              (checked (eq (alist-get 'checked item) t))
-              (indented (eq (alist-get 'indented item) t))
-              (checkbox (if checked "- [X]" "- [ ]"))
-              (prefix (if indented "  " "")))
-         (format "%s%s %s" prefix checkbox text)))
-     (append items nil)
-     "\n")))
+    (let ((lines nil))
+      (dolist (item (append items nil))
+        (let* ((text (or (alist-get 'text item) ""))
+               (checked (eq (alist-get 'checked item) t))
+               (indented (eq (alist-get 'indented item) t))
+               (sub-lines (split-string text "\n" t "[ \t]+")))
+          (if (and (> (length sub-lines) 1)
+                   (cl-some (lambda (l) (string-match-p "^- \\[[ Xx]\\]" l)) sub-lines))
+              ;; Item text contains embedded checkboxes — expand each line
+              (dolist (line sub-lines)
+                (cond
+                 ((string-match "^- \\[\\([Xx]\\)\\] \\(.*\\)" line)
+                  (push (format "%s- [X] %s"
+                                (if indented "  " "")
+                                (match-string 2 line))
+                        lines))
+                 ((string-match "^- \\[ \\] \\(.*\\)" line)
+                  (push (format "%s- [ ] %s"
+                                (if indented "  " "")
+                                (match-string 1 line))
+                        lines))
+                 ((not (string-empty-p line))
+                  (push (format "%s- [ ] %s"
+                                (if indented "  " "")
+                                line)
+                        lines))))
+            ;; Normal single item
+            (let ((checkbox (if checked "- [X]" "- [ ]"))
+                  (prefix (if indented "  " "")))
+              (push (format "%s%s %s" prefix checkbox text) lines)))))
+      (string-join (nreverse lines) "\n"))))
 
 (defun org-gkeep--labels-to-tags (labels)
   "Convert LABELS list to Org tag string."
@@ -320,12 +343,22 @@ LEVEL is the heading depth (default 2)."
             (when (and body-text (not (string-empty-p body-text)))
               (concat body-text "\n")))))
 
+(defun org-gkeep--body-has-checkboxes-p (body-text)
+  "Return non-nil if BODY-TEXT contains Org checkbox lines."
+  (and body-text
+       (string-match-p "^\\(  \\)?- \\[[ X]\\] " body-text)))
+
 (defun org-gkeep--org-to-note-data ()
   "Extract Google Keep data from Org heading at point.
-Returns an alist with title, text/list-items, labels, color."
+Returns an alist with title, text/list-items, labels, color.
+Auto-detects list type if body contains checkboxes."
   (let* ((title (org-get-heading t t t t))
          (body-text (org-gkeep--get-body-text))
          (note-type (or (org-entry-get nil "GKEEP_TYPE") "text"))
+         (note-type (if (and (string= note-type "text")
+                             (org-gkeep--body-has-checkboxes-p body-text))
+                        "list"
+                      note-type))
          (color (org-entry-get nil "GKEEP_COLOR"))
          (tags (org-get-tags))
          (labels (when tags (string-join tags ","))))

@@ -69,15 +69,42 @@ def save_state(keep):
             json.dump(keep.dump(), f)
 
 
+def _get_list_items(note):
+    """Get list items from a note, handling type mismatch.
+
+    gkeepapi doesn't change a node's Python class when the note type
+    changes on the server (e.g. text -> list).  A Note instance may
+    have ListItem children after a sync if the user converted it to
+    checkboxes in Google Keep.  This function detects that case.
+
+    Returns a list of ListItem nodes, or None if the note is not a list.
+    """
+    if isinstance(note, gkeepapi.node.List):
+        return list(note.items)
+
+    # Check for ListItem children on a Note instance (type changed on server)
+    list_items = [
+        child for child in note.children
+        if isinstance(child, gkeepapi.node.ListItem) and not child.deleted
+    ]
+    if list_items:
+        return gkeepapi.node.List.sorted_items(list_items)
+
+    return None
+
+
 def note_to_dict(note):
     """Convert a gkeepapi note to a JSON-serializable dict."""
     labels = [label.name for label in note.labels.all()]
     color = note.color.name if note.color else "DEFAULT"
 
+    list_items = _get_list_items(note)
+    is_list = list_items is not None
+
     result = {
         "id": note.id,
         "title": note.title,
-        "type": "list" if isinstance(note, gkeepapi.node.List) else "text",
+        "type": "list" if is_list else "text",
         "color": color,
         "pinned": note.pinned,
         "archived": note.archived,
@@ -89,9 +116,9 @@ def note_to_dict(note):
         },
     }
 
-    if isinstance(note, gkeepapi.node.List):
+    if is_list:
         items = []
-        for item in note.items:
+        for item in list_items:
             item_dict = {
                 "text": item.text,
                 "checked": item.checked,
@@ -131,8 +158,19 @@ def cmd_create(args):
 
     if args.list_items:
         items_data = json.loads(args.list_items)
-        items = [(item["text"], item.get("checked", False)) for item in items_data]
-        note = keep.createList(args.title, items)
+        note = keep.createList(args.title)
+        # Add items individually to preserve indentation
+        last_parent = None
+        for item_data in items_data:
+            new_item = note.add(item_data["text"], item_data.get("checked", False))
+            if item_data.get("indented", False) and last_parent is not None:
+                try:
+                    last_parent.indent(new_item)
+                except TypeError:
+                    new_item.indent()
+
+            else:
+                last_parent = new_item
     else:
         note = keep.createNote(args.title, args.text or "")
 
@@ -179,17 +217,20 @@ def cmd_update(args):
     if args.archived is not None:
         note.archived = args.archived.lower() == "true"
 
-    if isinstance(note, gkeepapi.node.List) and args.list_items is not None:
+    existing_items = _get_list_items(note)
+    is_list = existing_items is not None
+
+    if is_list and args.list_items is not None:
         items_data = json.loads(args.list_items)
         # Clear existing items and add new ones
-        for item in list(note.items):
+        for item in existing_items:
             item.delete()
         last_parent = None
         for item_data in items_data:
             new_item = note.add(item_data["text"], item_data.get("checked", False))
             if item_data.get("indented", False) and last_parent is not None:
                 try:
-                    new_item.indent(last_parent)
+                    last_parent.indent(new_item)
                 except TypeError:
                     # Older gkeepapi versions use indent() without args
                     new_item.indent()
